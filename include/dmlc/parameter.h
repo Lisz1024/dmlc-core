@@ -45,6 +45,15 @@ struct ParamError : public dmlc::Error {
 template<typename ValueType>
 inline ValueType GetEnv(const char *key,
                         ValueType default_value);
+/*!
+ * \brief Set environment variable.
+ * \param key the name of environment variable.
+ * \param value the new value for key.
+ * \return The value received
+ */
+template<typename ValueType>
+inline void SetEnv(const char *key,
+                   ValueType value);
 
 /*! \brief internal namespace for parameter manangement */
 namespace parameter {
@@ -963,11 +972,7 @@ class FieldEntry<bool>
  protected:
   // print default string
   virtual void PrintValue(std::ostream &os, bool value) const {  // NOLINT(*)
-    if (value) {
-      os << "True";
-    } else {
-      os << "False";
-    }
+    os << static_cast<int>(value);
   }
 };
 
@@ -988,6 +993,10 @@ class FieldEntry<float> : public FieldEntryNumeric<FieldEntry<float>, float> {
       std::ostringstream os;
       os << "Invalid Parameter format for " << key_ << " expect " << type_
          << " but value=\'" << value << '\'';
+      throw dmlc::ParamError(os.str());
+    } catch (const std::out_of_range) {
+      std::ostringstream os;
+      os << "Out of range value for " << key_ << ", value=\'" << value << '\'';
       throw dmlc::ParamError(os.str());
     }
   }
@@ -1010,6 +1019,10 @@ class FieldEntry<double>
       os << "Invalid Parameter format for " << key_ << " expect " << type_
          << " but value=\'" << value << '\'';
       throw dmlc::ParamError(os.str());
+    } catch (const std::out_of_range) {
+      std::ostringstream os;
+      os << "Out of range value for " << key_ << ", value=\'" << value << '\'';
+      throw dmlc::ParamError(os.str());
     }
   }
 };
@@ -1023,12 +1036,30 @@ template<typename ValueType>
 inline ValueType GetEnv(const char *key,
                         ValueType default_value) {
   const char *val = getenv(key);
-  if (val == NULL) return default_value;
+  // On some implementations, if the var is set to a blank string (i.e. "FOO="), then
+  // a blank string will be returned instead of NULL.  In order to be consistent, if
+  // the environment var is a blank string, then also behave as if a null was returned.
+  if (val == nullptr || !*val) {
+    return default_value;
+  }
   ValueType ret;
   parameter::FieldEntry<ValueType> e;
   e.Init(key, &ret, ret);
   e.Set(&ret, val);
   return ret;
+}
+
+// implement SetEnv
+template<typename ValueType>
+inline void SetEnv(const char *key,
+                   ValueType value) {
+  parameter::FieldEntry<ValueType> e;
+  e.Init(key, &value, value);
+#ifdef _WIN32
+  _putenv(key, e.GetStringValue(&value).c_str());
+#else
+  setenv(key, e.GetStringValue(&value).c_str(), 1);
+#endif  // _WIN32
 }
 }  // namespace dmlc
 #endif  // DMLC_PARAMETER_H_
